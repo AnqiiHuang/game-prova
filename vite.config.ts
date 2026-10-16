@@ -2,10 +2,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// base: './' 让构建结果使用相对路径，
-// 这样放到 GitHub Pages 的仓库子路径（如 /仓库名/）下也能正常加载。
+// GitHub Pages 项目站点的地址是 https://用户名.github.io/game-prova/，
+// 所以构建后的资源路径必须以 /game-prova/ 开头。
 export default defineConfig({
-  base: './',
+  base: '/game-prova/',
   plugins: [react()],
   test: {
     include: ['tests/**/*.test.ts'],

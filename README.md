@@ -96,19 +96,16 @@ npm run preview
 
 ---
 
-## 五、发布到 GitHub Pages（手动）
+## 五、发布到 GitHub Pages
 
-本项目不会替你创建账号、购买服务或自动发布。想要公开访问，可以自己按下面做：
+线上地址：<https://anqiihuang.github.io/game-prova/>
 
-1. 运行 `npm run build`。`vite.config.ts` 里已经设置了 `base: './'`，所以放在 `https://用户名.github.io/仓库名/` 这样的子路径下也能正常加载。
-2. **只发布 `dist/` 里的内容**，不要把源码目录（`src/`）直接当网站发布。
-3. 做法一：把 `dist/` 里的文件推到仓库的 `gh-pages` 分支，然后在仓库 Settings → Pages 里选择该分支。
-4. 做法二：在 Settings → Pages 选择 “GitHub Actions”，用官方的 `actions/deploy-pages` 工作流上传 `dist/`。
-5. 发布后用手机打开地址，确认能开始游戏、能存档。
+- `vite.config.ts` 里 `base` 设为 `'/game-prova/'`，打包后的 JS/CSS 路径都以 `/game-prova/assets/` 开头。如果仓库改名，要同步修改这里。
+- `.github/workflows/deploy.yml` 会在推送到 `main` 时自动：安装依赖 → 剧情体检 → 单元测试 → `npm run build` → **只上传 `dist/`** → 发布。源码不会被发布。
+- 第一次使用需要在 GitHub 仓库里手动设置一次：**Settings → Pages → Build and deployment → Source 选 “GitHub Actions”**。如果之前选的是 “Deploy from a branch”，页面会直接展示源码里的 `index.html`（引用 `/src/main.tsx`），导致 404，必须改掉。
+- 本地预览带前缀的效果：`npm run build && npm run preview`，然后打开 `http://localhost:4173/game-prova/`。
 
-关于小红书：这个网页游戏是外部网页。你可以自己录屏、截图，或把游戏里“分享”按钮生成的图片发出去；游戏不会自动发布到任何平台，也不收集任何账号信息。
-
----
+本项目不会替你创建账号、购买服务或自动发布到小红书，也不收集任何账号信息。
 
 ## 六、项目结构
 
