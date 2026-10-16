@@ -1,0 +1,29 @@
+{
+  "name": "escape-happy-community",
+  "private": true,
+  "version": "1.0.0",
+  "description": "《逃离幸福小区》——纯属虚构的中文互动文字网页游戏",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "check:story": "node --import tsx scripts/check-story.ts",
+    "check": "npm run check:story && npm test && npm run build"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2",
+    "vitest": "^2.0.5"
+  }
+}
