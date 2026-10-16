@@ -18,10 +18,10 @@ export function tryRun(s: GameState, cmd: Command, confirm = true) {
   return perform(s, { ...cmd, seq: s.seq, confirm } as CommandInput);
 }
 
-/** 第 1 天 10:15，读完家规并做完第一个选择，停在日程页。 */
+/** 第 1 天 10:10，读完家规，选“先回家”，停在家里的日程页。 */
 export function toHub(seed = 12345, force?: { helper?: FamilyId; luckTier?: LuckTier }): GameState {
   let s = run(fresh(seed, force), { kind: 'ackRules' });
-  s = run(s, { kind: 'choose', choiceId: 'd1n1_a' });
+  s = run(s, { kind: 'choose', choiceId: 'd1n1_c' });
   return s;
 }
 

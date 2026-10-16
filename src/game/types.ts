@@ -21,6 +21,15 @@ export type MealSlot = 'breakfast' | 'lunch' | 'dinner';
 export type ClueLevel = 'suspect' | 'confirmed';
 export type DocKey = 'form' | 'proof' | 'auth';
 export type RuleStatus = 'unknown' | 'true' | 'false';
+/** 玩家自己给家规做的判断标记，不代表系统公布答案。 */
+export type RuleMark = 'none' | 'trust' | 'doubt';
+export const RULE_MARK_LABEL: Record<RuleMark, string> = {
+  none: '未判断',
+  trust: '暂时相信',
+  doubt: '怀疑有假',
+};
+/** 当前所在的位置：小区门口，或者回到了三栋502（家里）。便利店等短途行动结束后仍回到出发的位置。 */
+export type Place = 'gate' | 'home';
 
 export type EndingId =
   | 'normal'
@@ -78,6 +87,8 @@ export interface GameState {
   day: number;
   time: number; // 当天从 0:00 起算的分钟数
   location: string;
+  place: Place;
+  marks: Record<number, RuleMark>;
   mode: 'rules' | 'hub' | 'node' | 'brief' | 'ended';
   nodeId: string | null;
   mainIdx: number;
@@ -143,6 +154,8 @@ export interface Ctx {
   rule(n: number, st: 'true' | 'false'): void;
   doc(k: DocKey): void;
   say(t: string): void;
+  /** 剧情里明确提到了某份材料：之后才会出现在日记的“材料”里。 */
+  mention(k: DocKey): void;
   rand(): number;
 }
 
@@ -162,6 +175,7 @@ export interface Choice {
   next?: string; // 进入另一个节点；缺省回到日程页
   repeat?: boolean; // 不算完成当前主线节点
   meal?: 'home' | 'bento'; // 选择后完成当前晚餐（仅小插曲使用）
+  goHome?: boolean; // 选择后走回家里（用时已包含在 minutes 中），位置变为“家里”
   ending?: EndingId;
   hintInt?: { min: number; text: string };
 }
@@ -174,10 +188,20 @@ export interface Variant {
 export interface StoryNode {
   id: string;
   kind: 'main' | 'side' | 'mini';
+  /** 篇幅：普通节点约 200–400 字；重要节点约 600–800 字（不含“展开细节”）。 */
+  weight?: 'normal' | 'key';
   title: string;
   location: string;
+  /**
+   * 开始这个节点需要玩家在哪里：
+   * home（默认）：要先在家里，在场人物才合理；out：出门办事，在门口或家里都可以开始；gate：只在小区门口开始。
+   */
+  place?: 'home' | 'out' | 'gate';
   present: NpcId[];
+  /** 默认可见的正文：关键线索和风险提示必须写在这里。 */
   paragraphs: string[];
+  /** 折叠的“展开细节”：环境、心理和补充描写，不含必须看到的关键信息。 */
+  details?: string[];
   variants?: Variant[];
   onEnter?: (g: Ctx) => void;
   choices: Choice[];
@@ -185,6 +209,8 @@ export interface StoryNode {
 
 export interface MainSlot {
   nodeId: string;
+  /** 睡前提醒里用的一句话，不剧透。 */
+  remind?: string;
   minTime?: number; // 最早可进入的时刻（分钟）
   noon?: boolean; // 中午陪爷爷去阳台的节点
   label: string; // 日程页按钮文案
@@ -212,6 +238,8 @@ export interface QuickQuest {
   money?: number;
   visible: (s: GameState) => boolean;
   requires: Req[];
+  /** 可以在哪些位置开始。默认：门口或家里都可以（出门办事，办完回到出发的位置）。 */
+  from?: Place[];
   effect: (g: Ctx) => void;
   result: string;
 }
@@ -231,6 +259,8 @@ export type Command =
   | { kind: 'shopClose' }
   | { kind: 'buy'; item: ShopItemId }
   | { kind: 'ask'; npc: FamilyId }
+  | { kind: 'go'; to: 'home' }
+  | { kind: 'markRule'; rule: number; mark: RuleMark }
   | { kind: 'sleep' }
   | { kind: 'nextDay' };
 

@@ -133,6 +133,13 @@ export function playBot(o: BotOptions): BotResult {
       continue;
     }
 
+    // 还在小区门口：先回家
+    const goHome = hv.daily.find((a) => a.id === 'go_home');
+    if (goHome && !goHome.disabled) {
+      apply(goHome.cmd, '回家');
+      continue;
+    }
+
     // 吃饭优先
     const eat = hv.daily.find((a) => a.id === 'eat_home');
     if (eat && !eat.disabled) {

@@ -1,7 +1,7 @@
 import { endingView, lockedNote } from '../game/story/endings';
 import { RULES } from '../game/story/data';
 import { LUCK_LABEL } from '../game/types';
-import { Changes, StatArea, TopBar } from './GameScreen';
+import { Feedback, StatArea, TopBar } from './GameScreen';
 import { useGame } from './ctx';
 
 export function EndingScreen() {
@@ -18,7 +18,7 @@ export function EndingScreen() {
       <TopBar s={s} />
       <main className="page" id="main">
         <StatArea s={s} />
-        <Changes s={s} />
+        <Feedback s={s} />
         <article className="paper reading ending" aria-labelledby="end-title">
           <p className="eyebrow">{view.tone === 'hidden' ? '隐藏结局' : view.tone === 'good' ? '结局' : failRestorable ? '这次失败了' : '本局结束'}</p>
           <h1 id="end-title" className="title small">

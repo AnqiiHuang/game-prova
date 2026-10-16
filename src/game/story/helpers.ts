@@ -27,3 +27,8 @@ export function missingDocs(s: GameState): string[] {
   if (!s.docs.auth) out.push('授权委托书');
   return out;
 }
+
+/** 日记里可以出现的材料：已经拿到，或者剧情里明确提到过。没提到的不会提前露面。 */
+export function mentionedDocs(s: GameState): ('form' | 'proof' | 'auth')[] {
+  return (['form', 'proof', 'auth'] as const).filter((k) => s.docs[k] || !!s.flags[`mention_${k}`]);
+}

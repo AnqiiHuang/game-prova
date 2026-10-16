@@ -1,30 +1,54 @@
 import { useState } from 'react';
 import { useBlockUse } from './useBlock';
+import { mentionedDocs } from '../game/story/helpers';
 import { CLUES, DOC_INFO, ITEMS, NOTE_LABEL, NPCS, RULES, RULE_NOTE } from '../game/story/data';
-import type { ItemId, NpcId } from '../game/types';
+import { RULE_MARK_LABEL, type ItemId, type NpcId, type RuleMark } from '../game/types';
 import { useGame } from './ctx';
 import { ConfirmDialog, Modal } from './Modal';
 import { SettingsBox } from './SettingsBox';
 
 export function RulesPanel({ onClose }: { onClose: () => void }) {
-  const { state: s } = useGame();
+  const { state: s, act } = useGame();
+  const marks: RuleMark[] = ['none', 'trust', 'doubt'];
   return (
     <Modal title="家规" onClose={onClose}>
       <ol className="rules-list">
         {RULES.map((r) => {
           const st = s.rules[r.n];
+          const mark = s.marks[r.n] ?? 'none';
           return (
             <li key={r.n}>
               {r.text}
-              <span className={`badge ${st === 'true' ? 'ok' : st === 'false' ? 'bad' : ''}`}>
-                {st === 'true' ? '已证实：真' : st === 'false' ? '已证实：假' : '待甄别'}
-              </span>
+              {st === 'unknown' ? (
+                <div className="mark-row" role="radiogroup" aria-label={`第 ${r.n} 条的判断`}>
+                  <span className="hint">我的判断</span>
+                  <div className="seg">
+                    {marks.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        role="radio"
+                        aria-checked={mark === m}
+                        className={`seg-btn ${mark === m ? 'on' : ''} ${m === 'doubt' ? 'doubt' : ''}`}
+                        onClick={() => act({ kind: 'markRule', rule: r.n, mark: m })}
+                      >
+                        {RULE_MARK_LABEL[m]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <span className={`badge ${st === 'true' ? 'ok' : 'bad'}`}>{st === 'true' ? '已证实：真' : '已证实：假'}</span>
+              )}
             </li>
           );
         })}
       </ol>
       <p className="rule-note">{RULE_NOTE}</p>
-      <p className="hint">查看家规不耗时间。只有你亲眼见证、亲耳证实的结论，才会在这里标记。</p>
+      <p className="hint">
+        “我的判断”只是你自己的记号，不代表游戏公布了答案，也不影响剧情。只有你亲眼见证、亲耳证实的结论，才会标成“已证实”。
+        查看和标记都不耗时间。
+      </p>
     </Modal>
   );
 }
@@ -104,23 +128,25 @@ export function DiaryPanel({ onClose }: { onClose: () => void }) {
   const confirmed = CLUES.filter((c) => s.clues[c.id] === 'confirmed');
   const suspect = CLUES.filter((c) => s.clues[c.id] === 'suspect' && c.suspect);
   const notes = Object.keys(NOTE_LABEL).filter((k) => s.notes[k]);
-  const docKeys = ['form', 'proof', 'auth'] as const;
+  // 材料只有在剧情里明确提到之后才会出现在日记里
+  const shownDocs = mentionedDocs(s);
+  const myMarks = RULES.filter((r) => s.rules[r.n] === 'unknown' && (s.marks[r.n] ?? 'none') !== 'none');
   return (
     <Modal title="日记" onClose={onClose}>
-      <p className="hint">日记只记录你已经发现的内容。查看日记不耗时间。</p>
+      <p className="hint">日记只记录你已经发现的内容，重要的事都在这里。查看日记不耗时间。</p>
 
-      {s.clues['c_notice1'] || s.clues['c_notice2'] ? (
+      {shownDocs.length ? (
         <>
-        <h3>材料</h3>
-        <ul className="plain-list">
-          {docKeys.map((k) => (
-            <li key={k} className="doc">
-              <span className={`badge ${s.docs[k] ? 'ok' : ''}`}>{s.docs[k] ? '已有' : '还没有'}</span>
-              <b>{DOC_INFO[k].name}</b>
-              <span className="hint">{DOC_INFO[k].hint}</span>
-            </li>
-          ))}
-        </ul>
+          <h3>办理材料</h3>
+          <ul className="plain-list">
+            {shownDocs.map((k) => (
+              <li key={k} className="doc">
+                <span className={`badge ${s.docs[k] ? 'ok' : ''}`}>{s.docs[k] ? '已有' : '还没有'}</span>
+                <b>{DOC_INFO[k].name}</b>
+                <span className="hint">{DOC_INFO[k].hint}</span>
+              </li>
+            ))}
+          </ul>
         </>
       ) : null}
 
@@ -151,6 +177,23 @@ export function DiaryPanel({ onClose }: { onClose: () => void }) {
       ) : (
         <p className="hint">暂时没有。</p>
       )}
+
+      {myMarks.length ? (
+        <>
+          <h3>我对家规的判断</h3>
+          <ul className="plain-list">
+            {myMarks.map((r) => (
+              <li key={r.n} className="entry">
+                <b>
+                  第 {r.n} 条：{RULE_MARK_LABEL[s.marks[r.n]]}
+                </b>
+                <p>{r.text}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="hint">这是你自己的判断，不是游戏公布的答案。</p>
+        </>
+      ) : null}
 
       {notes.length ? (
         <>

@@ -1,11 +1,14 @@
 // 剧情体检的核心逻辑：字数、断链、禁用词。供脚本和测试共用。
-import { ALL_NODES, MAIN_SLOTS, NODES, SIDES } from '../src/game/story';
+import { ALL_NODES, ARRIVAL_AGAIN, ARRIVAL_FIRST, MAIN_SLOTS, NODES, QUICKS, SIDES } from '../src/game/story';
 import { endingView } from '../src/game/story/endings';
 import { newGame } from '../src/game/engine';
 import { countCjk } from '../src/game/text';
 import type { EndingId, StoryNode } from '../src/game/types';
 
-const MIN_CJK = 800;
+// 默认可见正文的字数范围（不含“展开细节”）：
+//   普通节点约 200–400 字，允许 180–470；重要节点约 600–800 字，允许 520–900。
+export const RANGE = { normal: [180, 470], key: [520, 900] } as const;
+const MAX_DETAILS = 700;
 const BANNED = [
   '重合', '相同', '共鸣', '一致', '类似', '同样', '正好', '分毫不差', '如同', '暗合', '共振', '频率', '纹路', '印记',
   '量子', '能量', '机械', '植入', '哲学', '实验', '血', '器官', '伤疤', '排泄', '标本', '福尔马林', '病娇', '暴力', '乱伦', '幻觉', '宿命',
@@ -14,15 +17,16 @@ const BANNED = [
 const AI_WORD = /(^|[^A-Za-z])AI([^A-Za-z]|$)/;
 
 
-function nodeText(n: StoryNode, includeVariants: boolean): string {
+function nodeText(n: StoryNode, includeVariants: boolean, includeDetails = false): string {
   let t = n.paragraphs.join('');
   if (includeVariants) for (const v of n.variants ?? []) t += v.paragraphs.join('');
+  if (includeDetails) t += (n.details ?? []).join('');
   return t;
 }
 
 export interface LintResult {
   errors: string[];
-  report: { id: string; title: string; cjk: number }[];
+  report: { id: string; title: string; cjk: number; weight: 'normal' | 'key'; details: number }[];
   nodes: number;
   sides: number;
 }
@@ -33,13 +37,17 @@ export function lintStory(): LintResult {
   const err = (m: string) => {
     errors.push(m);
   };
-  // 1. 字数（只统计主线 / 支线正文，不含变体，保证最保守）
+  // 1. 字数：只统计默认可见的正文（不含变体和“展开细节”），按节点篇幅分档
   for (const n of ALL_NODES) {
     if (n.kind === 'mini') continue;
     const c = countCjk(nodeText(n, false));
-    report.push({ id: n.id, title: n.title, cjk: c });
-    if (c < MIN_CJK) err(`${n.id} 正文只有 ${c} 个汉字，少于 ${MIN_CJK}`);
+    report.push({ id: n.id, title: n.title, cjk: c, weight: n.weight ?? 'normal', details: countCjk((n.details ?? []).join('')) });
+    const [lo, hi] = RANGE[n.weight ?? 'normal'];
+    if (c < lo || c > hi) err(`${n.id}（${n.weight ?? 'normal'}）默认正文 ${c} 字，应在 ${lo}–${hi} 之间`);
+    const d = countCjk((n.details ?? []).join(''));
+    if (d > MAX_DETAILS) err(`${n.id} 的“展开细节”有 ${d} 字，超过 ${MAX_DETAILS}`);
   }
+  if (ALL_NODES.filter((n) => n.weight === 'key').length < 5) err('重要节点（key）少于 5 个');
 
   // 2. 选项数量 / 断链
   const ids = new Set<string>();
@@ -67,12 +75,17 @@ export function lintStory(): LintResult {
   }
   for (const n of ALL_NODES) {
     lint(`${n.id} 标题`, n.title);
-    lint(`${n.id} 正文`, nodeText(n, true));
+    lint(`${n.id} 正文`, nodeText(n, true, true));
     for (const c of n.choices) {
       lint(`${n.id}/${c.id} 标签`, c.label);
       if (typeof c.result === 'string') lint(`${n.id}/${c.id} 结果`, c.result);
     }
   }
+  for (const q of QUICKS) {
+    lint(`短行动 ${q.id} 标签`, q.label);
+    lint(`短行动 ${q.id} 结果`, q.result);
+  }
+  lint('回家文字', ARRIVAL_FIRST + ARRIVAL_AGAIN);
   const sample = newGame({ name: '林夏', gender: 'female', call: '', seed: 1, runId: 'check' });
   for (const id of ['normal', 'hidden', 'fail_fear', 'fail_health', 'timeout', 'fail_run'] as EndingId[]) {
     const v = endingView(sample, id);

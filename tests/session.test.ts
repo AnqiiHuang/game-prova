@@ -14,7 +14,7 @@ function start(sess: Session, seed = 321) {
 function collapse(sess: Session) {
   const s = sess.state as GameState;
   // 先到日程页
-  if (s.mode === 'node') sess.dispatch({ kind: 'choose', choiceId: 'd1n1_a' }, s.seq);
+  if (s.mode === 'node') sess.dispatch({ kind: 'choose', choiceId: 'd1n1_c' }, s.seq);
   const t = sess.state as GameState;
   t.stats.fear = 100;
   const r = sess.dispatch({ kind: 'rest', minutes: 30 }, t.seq, true);
@@ -54,7 +54,7 @@ describe('存档与继续', () => {
     expect(bad.ok).toBe(false);
     const cached = store.loadCache();
     expect(cached.status === 'ok' && cached.data.seq).toBe(s0.seq);
-    expect(sess.dispatch({ kind: 'choose', choiceId: 'd1n1_a' }, s0.seq).ok).toBe(true);
+    expect(sess.dispatch({ kind: 'choose', choiceId: 'd1n1_c' }, s0.seq).ok).toBe(true);
     const cached2 = store.loadCache();
     expect(cached2.status === 'ok' && cached2.data.seq).toBe(s0.seq + 1);
   });
@@ -63,8 +63,8 @@ describe('存档与继续', () => {
     const { sess } = memorySession();
     start(sess);
     const s = sess.state as GameState;
-    expect(sess.dispatch({ kind: 'choose', choiceId: 'd1n1_a' }, s.seq).ok).toBe(true);
-    const r = sess.dispatch({ kind: 'choose', choiceId: 'd1n1_a' }, s.seq);
+    expect(sess.dispatch({ kind: 'choose', choiceId: 'd1n1_c' }, s.seq).ok).toBe(true);
+    const r = sess.dispatch({ kind: 'choose', choiceId: 'd1n1_c' }, s.seq);
     expect(r.ok).toBe(false);
   });
 });
@@ -198,6 +198,7 @@ describe('失败：次数只记一次，不随读档回滚，第 4 次结束本�
     // 构造：第 1 天主线全部完成后睡觉
     const s = sess.state as GameState;
     s.mode = 'hub';
+    s.place = 'home';
     s.mainIdx = 3;
     s.time = 20 * 60;
     s.noon[1] = 'done';

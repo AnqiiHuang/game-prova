@@ -1,6 +1,6 @@
 // 本地存档：带版本号的 localStorage，读写出错时降级为“临时游玩”（只存在内存里）。
 
-import { SAVE_VERSION, type EndingId, type GameState, type RunMeta } from './types';
+import { SAVE_VERSION, type EndingId, type GameState, type RuleMark, type RunMeta } from './types';
 
 export const KEYS = {
   meta: 'xfq.v1.meta',
@@ -76,6 +76,23 @@ export function validateState(x: unknown): x is GameState {
   return true;
 }
 
+/** 旧存档兼容：补上后来新增的字段（位置、家规标记）。 */
+export function normalizeState(s: GameState): GameState {
+  const o = s as unknown as Record<string, unknown>;
+  if (o.place !== 'gate' && o.place !== 'home') {
+    o.place = typeof s.location === 'string' && s.location.startsWith('小区大门') ? 'gate' : 'home';
+  }
+  const marks: Record<number, RuleMark> = { 1: 'none', 2: 'none', 3: 'none', 4: 'none', 5: 'none' };
+  if (isObj(o.marks)) {
+    for (let n = 1; n <= 5; n++) {
+      const m = (o.marks as Record<string, unknown>)[String(n)];
+      if (m === 'trust' || m === 'doubt' || m === 'none') marks[n] = m;
+    }
+  }
+  s.marks = marks;
+  return s;
+}
+
 export function validateMeta(x: unknown): x is RunMeta {
   return (
     isObj(x) &&
@@ -132,6 +149,11 @@ export class SaveStore {
     }
   }
 
+  private readState(key: string): LoadResult<GameState> {
+    const r = this.read<GameState>(key, validateState);
+    return r.status === 'ok' ? { ...r, data: normalizeState(r.data) } : r;
+  }
+
   remove(key: string) {
     try {
       this.kv.removeItem(key);
@@ -150,19 +172,19 @@ export class SaveStore {
     return this.write(KEYS.cache, s);
   }
   loadCache() {
-    return this.read<GameState>(KEYS.cache, validateState);
+    return this.readState(KEYS.cache);
   }
   saveSleep(s: GameState) {
     return this.write(KEYS.sleep, s);
   }
   loadSleep() {
-    return this.read<GameState>(KEYS.sleep, validateState);
+    return this.readState(KEYS.sleep);
   }
   saveStart(s: GameState) {
     return this.write(KEYS.start, s);
   }
   loadStart() {
-    return this.read<GameState>(KEYS.start, validateState);
+    return this.readState(KEYS.start);
   }
 
   clearRun() {

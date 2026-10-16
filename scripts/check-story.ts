@@ -3,7 +3,7 @@ import { lintStory } from './story-lint';
 
 const r = lintStory();
 for (const n of r.report) {
-  console.log(`${n.cjk >= 800 ? '✓' : '✗'} ${n.id.padEnd(16)} ${String(n.cjk).padStart(5)} 字  ${n.title}`);
+  console.log(`${n.weight === 'key' ? '★' : '·'} ${n.id.padEnd(16)} ${String(n.cjk).padStart(4)} 字（细节 ${String(n.details).padStart(3)}）${n.title}`);
 }
 if (r.errors.length) {
   for (const e of r.errors) console.error('✗ ' + e);

@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { hubView, nodeView, SLOT_NAME, askBlock, buyBlock, type ActionView } from '../game/engine';
+import { useEffect, useRef, useState } from 'react';
+import { hubView, nodeView, SLOT_NAME, askBlock, askHow, buyBlock, type ActionView } from '../game/engine';
 import { ITEMS, NPCS, RULES, RULE_NOTE, SHOP_ORDER } from '../game/story/data';
 import { fmtTime } from '../game/text';
 import { FAMILY_IDS, LUCK_LABEL, type GameState, type MealSlot, type NpcId } from '../game/types';
@@ -52,10 +52,22 @@ export function StatArea({ s }: { s: GameState }) {
   );
 }
 
-export function Changes({ s }: { s: GameState }) {
-  if (!s.deltas.length && !s.notices.length) return null;
+/** 刚刚发生的变化。只对“上一个行动”有效，下一个行动开始时会整体清掉；也可以手动收起。 */
+export function Feedback({ s }: { s: GameState }) {
+  const [hiddenAt, setHiddenAt] = useState(-1);
+  // 日记类提示收成一行：重要的内容在日记里查看，不挂在正文上方
+  const isDiary = (n: string) => /日记新增|日记里多了|你认识了/.test(n);
+  const diaryNotes = s.notices.filter(isDiary);
+  const otherNotes = s.notices.filter((n) => !isDiary(n));
+  const has = s.deltas.length > 0 || s.notices.length > 0 || !!s.lastResult;
+  if (!has || hiddenAt === s.counters.steps) return null;
   return (
     <section className="changes" aria-live="polite" aria-label="刚刚发生的变化">
+      {s.lastResult ? (
+        <div className="result-box">
+          <p>{s.lastResult}</p>
+        </div>
+      ) : null}
       {s.deltas.length ? (
         <ul className="delta-list">
           {s.deltas.map((d, i) => (
@@ -69,11 +81,20 @@ export function Changes({ s }: { s: GameState }) {
           ))}
         </ul>
       ) : null}
-      {s.notices.map((n, i) => (
+      {otherNotes.map((n, i) => (
         <p className="prompt" key={i}>
           {n}
         </p>
       ))}
+      {diaryNotes.length ? (
+        <p className="prompt diary-note">日记更新了 {diaryNotes.length} 条记录，在“日记”里查看。</p>
+      ) : null}
+      <div className="changes-foot">
+        <span className="hint">重要的发现都记在日记里。</span>
+        <button type="button" className="btn ghost small" onClick={() => setHiddenAt(s.counters.steps)}>
+          收起
+        </button>
+      </div>
     </section>
   );
 }
@@ -101,15 +122,6 @@ function Paragraphs({ list }: { list: string[] }) {
         <p key={i}>{p}</p>
       ))}
     </div>
-  );
-}
-
-function ResultBox({ s }: { s: GameState }) {
-  if (!s.lastResult) return null;
-  return (
-    <section className="result-box" aria-live="polite">
-      <p>{s.lastResult}</p>
-    </section>
   );
 }
 
@@ -177,6 +189,12 @@ function NodeScreenBody() {
         </h1>
         <FavorChips ids={v.present} s={s} />
         <Paragraphs list={v.paragraphs} />
+        {v.details.length ? (
+          <details className="more">
+            <summary>展开细节</summary>
+            <Paragraphs list={v.details} />
+          </details>
+        ) : null}
       </article>
 
       <section className="options" aria-label="选项">
@@ -246,12 +264,15 @@ function HubBody() {
   const { state: s, act, openPanel } = useGame();
   const v = hubView(s);
   const slotName = v.currentSlot ? SLOT_NAME[v.currentSlot] : null;
+  const goHome = v.daily.find((a) => a.id === 'go_home');
+  const daily = v.daily.filter((a) => a.id !== 'go_home');
   return (
     <>
       <article className="paper">
         <p className="eyebrow">日程</p>
         <h1 className="title small">第 {s.day} 天的安排</h1>
-        <p className="hint">主线完成三件事后才能睡觉。其余行动都是可选的，但每一个都会用掉时间。</p>
+        <p className="reminder">{v.reminder}</p>
+        <p className="hint">其余行动都是可选的，但每一个都会用掉时间。</p>
         <MealStatus s={s} />
         {slotName ? <p className="prompt">*提示：现在是{slotName}时间。</p> : null}
       </article>
@@ -261,6 +282,7 @@ function HubBody() {
           主线 <small>{Math.min(s.mainIdx, v.mainTotal)} / {v.mainTotal}</small>
         </h2>
         <ActionBtn a={v.main} kind="main" />
+        {goHome ? <ActionBtn a={goHome} kind="main" /> : null}
       </section>
 
       {v.sides.length ? (
@@ -277,7 +299,7 @@ function HubBody() {
       {v.quests.length ? (
         <section className="group" aria-labelledby="g-quest">
           <h2 id="g-quest">
-            短行动 <small>可选</small>
+            {s.place === 'gate' ? '在门口' : '短行动'} <small>可选</small>
           </h2>
           {v.quests.map((a) => (
             <ActionBtn key={a.id} a={a} />
@@ -287,14 +309,18 @@ function HubBody() {
 
       <section className="group" aria-labelledby="g-daily">
         <h2 id="g-daily">日常</h2>
-        {v.daily.map((a) => (
+        {daily.map((a) => (
           <ActionBtn key={a.id} a={a} />
         ))}
         <div className="opt">
-          <p className="label">向家人要零花钱（每人每天一次，用时 5 分钟）</p>
+          <p className="label">
+            向家人要零花钱（每人每天一次，用时 5 分钟）
+            {s.place === 'gate' ? '。你不在家，只能给爸爸妈妈发消息。' : ''}
+          </p>
           <div className="ask-grid">
             {FAMILY_IDS.map((id) => {
               const block = askBlock(s, id);
+              const how = askHow(s, id);
               return (
                 <button
                   key={id}
@@ -305,7 +331,7 @@ function HubBody() {
                   onClick={() => act({ kind: 'ask', npc: id })}
                 >
                   {NPCS[id].name}
-                  {block ? '（已问）' : ''}
+                  {block ? (s.asked[`${s.day}:${id}`] ? '（已问）' : '（不在）') : how === 'message' ? '（发消息）' : ''}
                 </button>
               );
             })}
@@ -397,9 +423,10 @@ function BriefBody() {
 export function GameScreen() {
   const { state: s, openPanel } = useGame();
   const topRef = useRef<HTMLDivElement>(null);
+  // 标记家规这类“不耗时”的操作不会回到页面顶部；真正的行动（steps 增加）才会
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [s.seq, s.mode]);
+  }, [s.counters.steps, s.mode]);
 
   let body;
   if (s.mode === 'brief') body = <BriefBody />;
@@ -412,8 +439,7 @@ export function GameScreen() {
       <TopBar s={s} />
       <main className="page with-bar" id="main">
         <StatArea s={s} />
-        <Changes s={s} />
-        <ResultBox s={s} />
+        <Feedback s={s} />
         {body}
       </main>
       <nav className="bottombar" aria-label="常用入口">
@@ -430,7 +456,7 @@ export function GameScreen() {
           日记
         </button>
         <button type="button" onClick={() => openPanel('save')}>
-          存档
+          设置
         </button>
       </nav>
     </div>

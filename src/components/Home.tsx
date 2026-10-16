@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { Session } from '../game/session';
 import type { FamilyId, Gender, LuckTier } from '../game/types';
 import type { Settings } from '../settings';
+import { Entrance } from './Art';
+import { Modal } from './Modal';
 import { SettingsBox } from './SettingsBox';
 
 interface HomeProps {
@@ -14,23 +16,28 @@ interface HomeProps {
 
 export function Home({ session, settings, setSettings, onNew, onContinue }: HomeProps) {
   const [help, setHelp] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const cont = session.canContinue();
   return (
     <main className="page home" id="main">
-      <div className="paper">
-        <p className="eyebrow">纯属虚构的互动文字游戏</p>
-        <h1 className="title">逃离幸福小区</h1>
-        <p className="slogan">七天内，找出那条假的家规。</p>
-        <div className="prose">
-          <p>
-            假期回家的第一天，你刚走进小区大门，耳边就响起一个只有你能听见的声音：
-          </p>
-          <p className="quote">“欢迎来到幸福小区。你需要在七天内找到离开的办法。超过期限，本局游戏结束。”</p>
-          <p>
-            家里有一张写满规矩的纸，其中一条是假的。你要在七天里，靠观察、对话和一点耐心，弄明白这个家和这个小区到底出了什么问题。
-          </p>
+      <div className="home-top">
+        <span className="home-tag">纯属虚构的互动文字游戏</span>
+        <button type="button" className="btn small" onClick={() => setShowSettings(true)} aria-haspopup="dialog">
+          设置
+        </button>
+      </div>
+
+      <div className="paper home-card">
+        <Entrance />
+        <div className="home-head">
+          <h1 className="title">逃离幸福小区</h1>
+          <p className="slogan">七天内，找出那条假的家规。</p>
         </div>
-        <p className="disclaimer">本故事纯属虚构，人物、小区、物业与情节均不对应任何真实对象。游戏内没有血腥与暴力画面。</p>
+        <div className="prose">
+          <p>假期回家的第一天，你刚走进小区大门，耳边就响起一个只有你能听见的声音：</p>
+          <p className="quote">“欢迎来到幸福小区。你需要在七天内找到离开的办法。超过期限，本局游戏结束。”</p>
+          <p>家里留给你五条家规，其中一条是假的。你要靠观察、对话和一点耐心，弄明白这个家和这个小区到底卡在了哪里。</p>
+        </div>
 
         {session.notice ? <p className="prompt warn-text">*提示：{session.notice}</p> : null}
         {!session.persistent ? (
@@ -67,19 +74,27 @@ export function Home({ session, settings, setSettings, onNew, onContinue }: Home
             <h2>怎么玩</h2>
             <ul>
               <li>游戏共 7 天。每天有 3 个主线事件，另有可选的支线和日常行动。</li>
+              <li>你在哪里，就只能和在场的人当面说话。不在家时，只能给爸爸妈妈发消息。</li>
               <li>时间只会在你行动之后流逝。阅读、查看规则、背包、关系和日记都不耗时间。</li>
               <li>每天中午 12 点，需要主动选择“等到中午并陪爷爷去阳台”。</li>
               <li>每天要吃三顿饭。体力、健康、恐惧、零花钱都会影响你能做什么。</li>
+              <li>家规可以自己标记“暂时相信”或“怀疑有假”。这只是你的判断，答案要靠剧情慢慢证实。</li>
               <li>睡觉会保存进度。若中途失败，可以读取最近一次睡觉存档，但失败次数不会清零，累计 4 次失败本局结束。</li>
               <li>第 7 天结束前没有找到离开的办法，本局结束，旧存档作废。</li>
-              <li>日记只记录你已经发现的内容，并区分“怀疑”和“已证实”。</li>
             </ul>
           </div>
         ) : null}
 
-        <SettingsBox settings={settings} setSettings={setSettings} compact />
+        <p className="disclaimer">纯属虚构的互动文字游戏。人物、小区、物业与情节均为虚构，没有血腥与暴力画面。</p>
         {import.meta.env.DEV ? <p className="hint">开发模式：可在“开始游戏”页使用固定种子与调试选项。</p> : null}
       </div>
+
+      {showSettings ? (
+        <Modal title="设置" onClose={() => setShowSettings(false)}>
+          <p className="hint">调整字号和主题，立刻生效，并保存在你的浏览器里。</p>
+          <SettingsBox settings={settings} setSettings={setSettings} />
+        </Modal>
+      ) : null}
     </main>
   );
 }

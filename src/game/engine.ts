@@ -1,7 +1,7 @@
 // 游戏引擎：统一处理行动、条件、资源、时间。
 // 所有命令都是“一次完整操作”：先检查，再结算，最后产生新的状态（输入状态不被修改）。
 
-import { MAIN_SLOTS, NODES, QUICKS, SIDES, mealVignette } from './story';
+import { ARRIVAL_AGAIN, ARRIVAL_FIRST, MAIN_SLOTS, NODES, QUICKS, SIDES, mealVignette } from './story';
 import { CLUE_MAP, DOC_INFO, ITEMS, NPCS, RULES } from './story/data';
 import { pickMany, pick, randInt, nextFloat } from './random';
 import { fmt, fmtTime, makeVoice } from './text';
@@ -20,6 +20,8 @@ import {
   GameState,
   Gender,
   ItemId,
+  Place,
+  RuleMark,
   LUCK_VALUE,
   LuckTier,
   MealRec,
@@ -117,6 +119,8 @@ export function newGame(o: NewGameOptions): GameState {
     day: 1,
     time: START_TIME,
     location: '小区大门',
+    place: 'gate',
+    marks: { 1: 'none', 2: 'none', 3: 'none', 4: 'none', 5: 'none' },
     mode: 'rules',
     nodeId: null,
     mainIdx: 0,
@@ -258,11 +262,16 @@ class Context implements Ctx {
   doc(k: DocKey) {
     if (this.s.docs[k]) return;
     this.s.docs[k] = true;
+    this.s.flags[`mention_${k}`] = true;
     this.s.notices.push(`*提示：你拿到了「${DOC_INFO[k].name}」。`);
   }
 
   say(t: string) {
     this.s.notices.push(`*提示：${t}`);
+  }
+
+  mention(k: DocKey) {
+    this.s.flags[`mention_${k}`] = true;
   }
 
   rand() {
@@ -421,7 +430,9 @@ export interface NodeView {
   title: string;
   location: string;
   kind: StoryNode['kind'];
+  weight: 'normal' | 'key';
   paragraphs: string[];
+  details: string[];
   present: NpcId[];
   choices: ChoiceView[];
 }
@@ -443,7 +454,9 @@ export function nodeView(s: GameState): NodeView | null {
     title: node.title,
     location: node.location,
     kind: node.kind,
+    weight: node.weight ?? 'normal',
     paragraphs: paragraphs.map((p) => fmt(p, v)),
+    details: (node.details ?? []).map((p) => fmt(p, v)),
     present: node.present,
     choices: visibleChoices(s, node).map((c) => {
       const minutes = choiceMinutes(s, c);
@@ -463,6 +476,27 @@ export function nodeView(s: GameState): NodeView | null {
   };
 }
 
+// ---------------- 位置与在场人物 ----------------
+
+export function placeLabel(place: Place): string {
+  return place === 'gate' ? '小区大门' : '三栋502 · 家中';
+}
+
+const NOT_HOME = '你还在小区门口，家里人都在三栋。先回家（约 10 分钟）。';
+
+/** 在当前位置能不能开始这个节点。家里的节点必须先回家，不能隔着一段路和家人面对面。 */
+export function nodeStartBlock(s: GameState, node: StoryNode): string | null {
+  const need = node.place ?? 'home';
+  if (need === 'home' && s.place !== 'home') return NOT_HOME;
+  if (need === 'gate' && s.place !== 'gate') return '这件事只能在小区门口做。';
+  return null;
+}
+
+/** 只有人在家里，才能和家人面对面。 */
+export function atHome(s: GameState): boolean {
+  return s.place === 'home';
+}
+
 export interface ActionView {
   id: string;
   label: string;
@@ -473,6 +507,8 @@ export interface ActionView {
 }
 
 export interface HubView {
+  reminder: string;
+  place: Place;
   main: ActionView;
   sides: ActionView[];
   quests: ActionView[];
@@ -496,6 +532,7 @@ function mealWindowText() {
 
 export function eatBlock(s: GameState, how: 'home' | 'bento'): string | null {
   if (s.shopOpen) return '你还在便利店里，先离开便利店。';
+  if (how === 'home' && !atHome(s)) return '你还在小区门口，家里的饭要回家才能吃。';
   const slot = currentMealSlot(s);
   if (!slot) {
     const open = SLOTS.find((sl) => {
@@ -520,11 +557,34 @@ export function useBlock(s: GameState, item: 'meds' | 'drink'): string | null {
   return null;
 }
 
+/** 不在家时，只有有手机的爸爸妈妈可以用消息联系。 */
+export function canMessage(npc: FamilyId): boolean {
+  return npc === 'mom' || npc === 'dad';
+}
+
 export function askBlock(s: GameState, npc: FamilyId): string | null {
   if (s.shopOpen) return '你还在便利店里，先离开便利店。';
   if (s.asked[`${s.day}:${npc}`]) return '今天已经问过了。';
   if (s.time >= DAY_END) return '太晚了。';
+  if (!atHome(s) && !canMessage(npc)) return `${NPCS[npc].name}不在你身边，也没法用手机联系。回家再问吧。`;
+  if (askHow(s, npc) === 'message' && !canMessage(npc)) return `${NPCS[npc].name}现在不在，也没法用手机联系。`;
   return null;
+}
+
+/** 这位家人此刻是不是在外面（上班、出门）。和剧情里的安排一致：爸爸白天常不在，第 3 天妈妈上早班。 */
+export function isOutside(s: GameState, npc: FamilyId): boolean {
+  if (npc === 'dad' && s.day >= 2) {
+    if (s.day === 2 && s.time >= 11 * 60 + 30 && s.time < 14 * 60) return false; // 第 2 天中午他回家吃饭
+    return s.time >= 8 * 60 && s.time < 17 * 60;
+  }
+  if (npc === 'mom' && s.day === 3) return s.time < 12 * 60 + 30;
+  return false;
+}
+
+/** 面对面，还是发消息。 */
+export function askHow(s: GameState, npc: FamilyId): 'face' | 'message' {
+  if (!atHome(s)) return 'message';
+  return isOutside(s, npc) ? 'message' : 'face';
 }
 
 export function buyBlock(s: GameState, item: ShopItemId): string | null {
@@ -537,6 +597,8 @@ export function buyBlock(s: GameState, item: ShopItemId): string | null {
 
 function sideBlock(s: GameState, d: SideDef): string | null {
   if (s.shopOpen) return '你还在便利店里，先离开便利店。';
+  const where = nodeStartBlock(s, NODES[d.nodeId]);
+  if (where) return where;
   if (d.once && s.sideDone.includes(d.id)) return '已经完成。';
   const miss = unmetReqs(s, d.requires);
   if (miss.length) return `缺少：${miss.join('、')}`;
@@ -547,6 +609,7 @@ function sideBlock(s: GameState, d: SideDef): string | null {
 
 function questBlock(s: GameState, q: QuickQuest): string | null {
   if (s.shopOpen) return '你还在便利店里，先离开便利店。';
+  if (q.from && !q.from.includes(s.place)) return s.place === 'gate' ? '这件事要回到家里才能做。' : '这件事要在小区门口才能做。';
   if (s.questDone.includes(q.id)) return '已经完成。';
   const miss = unmetReqs(s, q.requires);
   if (miss.length) return `缺少：${miss.join('、')}`;
@@ -566,12 +629,42 @@ function mainPlan(s: GameState): { wait: number; nodeId: string; noon: boolean }
   return { wait, nodeId: slot.nodeId, noon };
 }
 
+/** 还没处理的事，用一句不剧透的话说出来（睡前提醒、日程页提示共用）。 */
+export function pendingThings(s: GameState): string[] {
+  const slots = MAIN_SLOTS[s.day] ?? [];
+  return slots.slice(s.mainIdx).map((sl) => {
+    const base = sl.remind ?? sl.label;
+    return sl.minTime && s.time < sl.minTime ? `${base}（${fmtTime(sl.minTime)} 之后）` : base;
+  });
+}
+
 export function sleepBlock(s: GameState): string | null {
   if (s.shopOpen) return '你还在便利店里，先离开便利店。';
   const total = MAIN_SLOTS[s.day]?.length ?? 3;
-  if (s.mainIdx < total) return '今天的主线事件还没有完成，不能睡觉。';
-  if (s.time < SLEEP_MIN) return `还没到睡觉的时候（${fmtTime(SLEEP_MIN)} 之后可以睡）。`;
+  if (s.mainIdx < total) return `还有事没处理完：${pendingThings(s).join('；')}。办完再睡，今晚才睡得着。`;
+  if (s.time < SLEEP_MIN) return `今天要办的事都办完了，可夜还没深（${fmtTime(SLEEP_MIN)} 之后才睡得着）。可以去补材料、找人聊聊，或者歇一歇。`;
+  if (!atHome(s)) return '你还在小区门口，睡觉要回家。';
   return null;
+}
+
+/** 日程页顶部的一句提醒：今天还有什么事、人在哪里。 */
+export function hubReminder(s: GameState): string {
+  const slots = MAIN_SLOTS[s.day] ?? [];
+  const parts: string[] = [];
+  if (!atHome(s)) parts.push('你还站在小区门口，家里人都在三栋，要见他们得先回家。');
+  if (s.mainIdx < slots.length) {
+    parts.push(`今天还有事没处理：${pendingThings(s).join('；')}。`);
+  } else if (s.time < SLEEP_MIN) {
+    parts.push(`今天要办的事都办完了。夜还没深，${fmtTime(SLEEP_MIN)} 之后就可以睡觉并存档。`);
+  } else {
+    parts.push('今天要办的事都办完了，随时可以睡觉并存档。');
+  }
+  return parts.join('');
+}
+
+function mainBlock(s: GameState, nodeId: string): string | null {
+  if (s.shopOpen) return '你还在便利店里，先离开便利店。';
+  return nodeStartBlock(s, NODES[nodeId]);
 }
 
 export function hubView(s: GameState): HubView {
@@ -605,7 +698,7 @@ export function hubView(s: GameState): HubView {
       id: 'main',
       label,
       sub,
-      disabled: s.shopOpen ? '你还在便利店里，先离开便利店。' : null,
+      disabled: mainBlock(s, plan.nodeId),
       cmd: { kind: 'main' },
       warn: crossWarning(s, plan.wait),
     };
@@ -627,6 +720,18 @@ export function hubView(s: GameState): HubView {
   }));
   const slot = currentMealSlot(s);
   const daily: ActionView[] = [
+    ...(atHome(s)
+      ? []
+      : [
+          {
+            id: 'go_home',
+            label: '回家（三栋502）',
+            sub: '步行约 10 分钟 · 到家以后才能和家人面对面',
+            disabled: s.shopOpen ? '你还在便利店里，先离开便利店。' : s.time + 10 > DAY_END ? '太晚了。' : null,
+            cmd: { kind: 'go', to: 'home' } as Command,
+            warn: crossWarning(s, 10),
+          },
+        ]),
     {
       id: 'eat_home',
       label: slot ? `吃家里的${SLOT_NAME[slot]}` : '吃家里的饭',
@@ -668,7 +773,17 @@ export function hubView(s: GameState): HubView {
       warn: crossWarning(s, 30),
     },
   ];
-  return { main, sides, quests, daily, sleep: sleepView(s), currentSlot: slot, mainTotal: slots.length };
+  return {
+    reminder: hubReminder(s),
+    place: s.place,
+    main,
+    sides,
+    quests,
+    daily,
+    sleep: sleepView(s),
+    currentSlot: slot,
+    mainTotal: slots.length,
+  };
 }
 
 function sleepView(s: GameState): ActionView {
@@ -690,14 +805,27 @@ function fail(reason: string): CommandResult {
 function begin(s: GameState): Context {
   s.seq += 1;
   s.counters.steps += 1;
+  // 新的行动开始：上一件事留下的反馈和提示一律清掉，需要保留的信息已经记在日记里
   s.notices = [];
   s.deltas = [];
+  s.lastResult = null;
   return new Context(s);
 }
 
 function finish(g: Context): CommandResult {
   failureCheck(g);
   return { ok: true, state: g.s };
+}
+
+/** 走回家的结算文字。第一次回家时，家里人会和你当面说起门卡的事。 */
+function arrivalText(g: Context): string {
+  const s = g.s;
+  if (!s.flags['arrived_home']) {
+    s.flags['arrived_home'] = true;
+    g.clue('c_dad_hides', 'suspect');
+    return ARRIVAL_FIRST;
+  }
+  return ARRIVAL_AGAIN;
 }
 
 export function perform(prev: GameState, input: CommandInput): CommandResult {
@@ -716,6 +844,17 @@ export function perform(prev: GameState, input: CommandInput): CommandResult {
     // 读完家规后直接进入第一段剧情
     enterNode(g, MAIN_SLOTS[1][0].nodeId);
     return finish(g);
+  }
+
+  // 给家规做标记：不耗时间、不改变任何数值，只记录玩家自己的判断
+  if (cmd.kind === 'markRule') {
+    if (prev.mode !== 'hub' && prev.mode !== 'node') return fail('现在不能做标记。');
+    if (!(cmd.rule in prev.rules)) return fail('没有这一条家规。');
+    if (!['none', 'trust', 'doubt'].includes(cmd.mark)) return fail('标记不正确。');
+    if (prev.rules[cmd.rule] !== 'unknown') return fail('这一条已经证实了，不需要再标记。');
+    s.seq += 1;
+    s.marks[cmd.rule] = cmd.mark;
+    return { ok: true, state: s };
   }
 
   if (cmd.kind === 'nextDay') {
@@ -752,8 +891,8 @@ export function perform(prev: GameState, input: CommandInput): CommandResult {
       if (!s.shopOpen) return fail('你不在便利店。');
       const g = begin(s);
       s.shopOpen = false;
-      s.location = '三栋502 · 家中';
-      g.say('你离开了便利店，回到家里。');
+      s.location = placeLabel(s.place);
+      g.say(s.place === 'home' ? '你离开了便利店，回到家里。' : '你离开了便利店，回到小区门口。');
       return finish(g);
     }
     case 'buy': {
@@ -787,9 +926,24 @@ export function perform(prev: GameState, input: CommandInput): CommandResult {
   if (s.shopOpen && cmd.kind !== 'shopOpen') return fail('你还在便利店里，先离开便利店。');
 
   switch (cmd.kind) {
+    case 'go': {
+      if (prev.place === 'home') return fail('你已经在家里了。');
+      if (s.time + 10 > DAY_END) return fail('太晚了。');
+      const warn = crossWarning(prev, 10);
+      if (warn && !input.confirm) return { ok: false, confirm: true, reason: warn };
+      const g = begin(s);
+      advance(g, 10);
+      if (s.ending) return finish(g);
+      s.place = 'home';
+      s.location = placeLabel('home');
+      s.lastResult = fmt(arrivalText(g), v);
+      return finish(g);
+    }
     case 'main': {
       const plan = mainPlan(prev);
       if (!plan) return fail('今天的主线已经完成。');
+      const placeBlock = mainBlock(prev, plan.nodeId);
+      if (placeBlock) return fail(placeBlock);
       const warn = crossWarning(prev, plan.wait);
       if (warn && !input.confirm) return { ok: false, confirm: true, reason: warn };
       const g = begin(s);
@@ -896,22 +1050,29 @@ export function perform(prev: GameState, input: CommandInput): CommandResult {
       const amount = cmd.npc === 'bro' ? 3 : favor >= 60 ? 10 : 5;
       const roll = nextFloat(s);
       const name = NPCS[cmd.npc].name;
+      const how = askHow(prev, cmd.npc);
       if (roll < p) {
         g.stat('money', amount, `${name}给了零花钱`);
         g.favor(cmd.npc, 1, '你开口要零花钱，对方痛快地给了');
         s.lastResult = fmt(
-          cmd.npc === 'bro'
-            ? '小宇翻出他的小铁盒，数了半天，抓了几枚硬币放在你手里：“只能给这么多。”'
-            : `${name}想了想，从口袋里掏出一些钱递给你：“省着点花。”`,
+          how === 'message'
+            ? `你给${name}发了条消息，问能不能给点零花钱。过了几分钟，手机震了一下，${name}转来 ${amount} 元，附了一句：“省着点花。”`
+            : cmd.npc === 'bro'
+              ? '小宇翻出他的小铁盒，数了半天，抓了几枚硬币放在你手里：“只能给这么多。”'
+              : `${name}想了想，从口袋里掏出一些钱递给你：“省着点花。”`,
           v,
         );
       } else {
         s.lastResult = fmt(
-          cmd.npc === 'dad'
-            ? '爸爸皱了皱眉：“要钱做什么？家里有吃有住。”他没有再多说。今天看来是问不出了。'
-            : cmd.npc === 'bro'
-              ? '小宇把铁盒抱得紧紧的：“今天不行，我要攒钱买小汽车！”'
-              : `${name}摇摇头：“今天手头紧，改天吧。”`,
+          how === 'message'
+            ? cmd.npc === 'dad'
+              ? '你给爸爸发了消息。他隔了很久才回了一句：“要钱做什么？家里有吃有住。”之后再没有下文。今天看来是问不出了。'
+              : '你给妈妈发了消息。她很快回了一条：“今天手头紧，改天吧。”后面跟了一个抱歉的表情。'
+            : cmd.npc === 'dad'
+              ? '爸爸皱了皱眉：“要钱做什么？家里有吃有住。”他没有再多说。今天看来是问不出了。'
+              : cmd.npc === 'bro'
+                ? '小宇把铁盒抱得紧紧的：“今天不行，我要攒钱买小汽车！”'
+                : `${name}摇摇头：“今天手头紧，改天吧。”`,
           v,
         );
       }
@@ -947,6 +1108,8 @@ function applyChoice(s: GameState, node: StoryNode, c: Choice, minutes: number, 
   }
   c.effect?.(g);
   g.talkBonus = false;
+  if (c.goHome) s.place = 'home';
+  s.location = placeLabel(s.place);
   const res = typeof c.result === 'function' ? c.result(g) : c.result;
   s.lastResult = fmt(res, v);
   // 节点完成
@@ -1008,7 +1171,8 @@ function doSleep(g: Context): CommandResult {
   s.noon[s.day] = 'pending';
   s.meals[s.day] = emptyMeals();
   s.shopOpen = false;
-  s.location = '三栋502 · 家中';
+  s.place = 'home';
+  s.location = placeLabel('home');
   s.nodeId = null;
   s.lastResult = null;
   const left = LAST_DAY - day;
@@ -1044,6 +1208,8 @@ export function devJumpToDay(s: GameState, day: number): GameState {
   c.rulesAck = true;
   c.mode = 'hub';
   c.nodeId = null;
+  c.place = 'home';
+  c.location = placeLabel('home');
   c.day = day;
   c.time = WAKE;
   c.mainIdx = 0;
