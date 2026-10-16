@@ -167,9 +167,9 @@ describe('开场悬疑：第一次选择前就能看到的矛盾', () => {
     const s = atGateNode();
     const v = nodeView(s)!;
     const text = v.paragraphs.join('');
-    expect(text).toMatch(/新门禁卡我早就办好了/);
+    expect(text).toMatch(/新门禁卡我办过了/);
     expect(text).toMatch(/登记本/);
-    expect(text).toMatch(/五零二没有人来办过/);
+    expect(text).toMatch(/没有五零二/);
     // 为什么不能直接离开：一人一刷、只有新卡或临时通行单、值班室只认业主
     expect(text).toMatch(/一人一刷/);
     expect(text).toMatch(/临时通行单/);
@@ -179,9 +179,10 @@ describe('开场悬疑：第一次选择前就能看到的矛盾', () => {
     expect(v.choices.map((c) => c.label).join('')).toMatch(/回家/);
   });
 
-  it('这个矛盾记进日记（怀疑），并在第 3 天值班室里被证实，不凭空新增无法解释的异常', () => {
+  it('这个矛盾先记成“说法”，不是事实；第 3 天值班室里才被证实，不凭空新增无法解释的异常', () => {
     const s = atGateNode();
-    expect(s.clues['c_dad_card']).toBe('suspect');
+    expect(s.clues['c_dad_card']).toBe('claim');
+    expect(s.clues['c_zhou_book']).toBe('claim');
     // 第 3 天进入值班室节点
     let d3 = atDay(run(atGateHub(), { kind: 'go', to: 'home' }), 3, 16 * 60);
     d3 = run(d3, { kind: 'main' }); // 第 1 个主线

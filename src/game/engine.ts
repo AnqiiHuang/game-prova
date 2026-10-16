@@ -3,6 +3,7 @@
 
 import { ARRIVAL_AGAIN, ARRIVAL_FIRST, MAIN_SLOTS, NODES, QUICKS, SIDES, mealVignette } from './story';
 import { CLUE_MAP, DOC_INFO, ITEMS, NPCS, RULES } from './story/data';
+import { TASKS, TASK_MAP, taskFlag, taskGiven } from './story/tasks';
 import { pickMany, pick, randInt, nextFloat } from './random';
 import { fmt, fmtTime, makeVoice } from './text';
 import {
@@ -226,10 +227,11 @@ class Context implements Ctx {
     const def = CLUE_MAP[id];
     if (!def) throw new Error(`未知线索：${id}`);
     const cur = this.s.clues[id];
-    if (cur === 'confirmed') return;
-    if (cur === 'suspect' && lvl === 'suspect') return;
+    // 记录只升不降：说法 → 怀疑 → 已证实。猜测和听来的话，不会被自动记成“已证实”。
+    if (cur && CLUE_RANK[cur] >= CLUE_RANK[lvl]) return;
     this.s.clues[id] = lvl;
-    this.s.notices.push(`*提示：日记新增${lvl === 'confirmed' ? '【已证实】' : '【怀疑】'}${def.title}。`);
+    const tag = lvl === 'confirmed' ? '【已证实】' : lvl === 'claim' ? '【说法】' : '【怀疑】';
+    this.s.notices.push(`*提示：日记新增${tag}${def.title}。`);
   }
 
   note(key: string, text: string) {
@@ -274,10 +276,21 @@ class Context implements Ctx {
     this.s.flags[`mention_${k}`] = true;
   }
 
+  /** 玩家被交代了一件事。同一件事只会触发一次：刷新、读档后标记仍在。 */
+  task(id: string) {
+    const def = TASK_MAP[id];
+    if (!def) throw new Error(`未知任务：${id}`);
+    if (taskGiven(this.s, id)) return;
+    this.s.flags[taskFlag(id)] = true;
+    this.s.notices.push(`*提示：日记里多了一条待办：${def.title}。`);
+  }
+
   rand() {
     return nextFloat(this.s);
   }
 }
+
+const CLUE_RANK: Record<ClueLevel, number> = { claim: 1, suspect: 2, confirmed: 3 };
 
 // ---------------- 时间与结算 ----------------
 
@@ -516,6 +529,14 @@ export interface HubView {
   sleep: ActionView;
   currentSlot: MealSlot | null;
   mainTotal: number;
+  /** 临近用餐或约定时的简短提醒。 */
+  alerts: string[];
+  /** 默认突出的 3–4 个行动：当前必须处理的事 + 此地此刻最相关的。 */
+  primary: ActionView[];
+  /** “更多探索”：其余的调查与对话。 */
+  more: ActionView[];
+  /** “日常行动”：吃饭、休息、购物、睡觉等（要零花钱和背包由界面补在后面）。 */
+  routine: ActionView[];
 }
 
 export function currentMealSlot(s: GameState): MealSlot | null {
@@ -633,6 +654,11 @@ function mainPlan(s: GameState): { wait: number; nodeId: string; noon: boolean }
 export function pendingThings(s: GameState): string[] {
   const slots = MAIN_SLOTS[s.day] ?? [];
   return slots.slice(s.mainIdx).map((sl) => {
+    if (sl.task) {
+      // 委托：交代之前，不显示名称、目标和时间
+      const t = TASK_MAP[sl.task];
+      return taskGiven(s, sl.task) ? `${t.title}（${t.when}）` : '下午还没有安排';
+    }
     const base = sl.remind ?? sl.label;
     return sl.minTime && s.time < sl.minTime ? `${base}（${fmtTime(sl.minTime)} 之后）` : base;
   });
@@ -664,8 +690,44 @@ export function hubReminder(s: GameState): string {
 
 function mainBlock(s: GameState, nodeId: string): string | null {
   if (s.shopOpen) return '你还在便利店里，先离开便利店。';
+  const slot = (MAIN_SLOTS[s.day] ?? []).find((x) => x.nodeId === nodeId);
+  if (slot?.task && !taskGiven(s, slot.task)) return '还没有人交代你这件事。';
   return nodeStartBlock(s, NODES[nodeId]);
 }
+
+/** 临近用餐或重要约定时的简短提醒（最多两条）。 */
+export function hubAlerts(s: GameState): string[] {
+  const out: string[] = [];
+  if (s.noon[s.day] === 'pending') {
+    if (s.time < NOON_START && NOON_START - s.time <= 60) {
+      out.push(`离中午十二点的约定还有 ${NOON_START - s.time} 分钟，爷爷在等你扶他去阳台。`);
+    } else if (s.time >= NOON_START) {
+      out.push('已经过了十二点，爷爷在等你去阳台（13:00 之前都还来得及）。');
+    }
+  }
+  const slot = currentMealSlot(s);
+  if (slot) {
+    const end = MEAL_WINDOW[slot][1];
+    out.push(
+      end - s.time <= 60
+        ? `${SLOT_NAME[slot]}时间快过了（${fmtTime(end)} 结束），你还没吃。`
+        : `现在是${SLOT_NAME[slot]}时间（到 ${fmtTime(end)}），你还没吃。`,
+    );
+  } else {
+    for (const sl of SLOTS) {
+      const [a] = MEAL_WINDOW[sl];
+      const m = s.meals[s.day][sl];
+      if (!m.eaten && !m.settled && a > s.time && a - s.time <= 30) {
+        out.push(`快到${SLOT_NAME[sl]}时间了（${fmtTime(a)} 开始）。`);
+        break;
+      }
+    }
+  }
+  return out.slice(0, 2);
+}
+
+/** 日程页顶部最多放几个“此刻最相关”的行动。 */
+const PRIMARY_MAX = 4;
 
 export function hubView(s: GameState): HubView {
   const slots = MAIN_SLOTS[s.day] ?? [];
@@ -688,8 +750,12 @@ export function hubView(s: GameState): HubView {
         label = '现在就陪爷爷去阳台';
         sub = '已经过了 12:00，爷爷在等你';
       }
+    } else if (slot.task && !taskGiven(s, slot.task)) {
+      label = '下午还没有安排';
+      sub = '等有人交代之后才会出现';
     } else if (plan.wait > 0) {
-      label = `等到 ${fmtTime(s.time + plan.wait)} 之后，继续：${slot.label}`;
+      // 还没到时候：不提前说出这一段的标题
+      label = slot.task ? `等到 ${fmtTime(s.time + plan.wait)} 之后，继续：${slot.label}` : `等到 ${fmtTime(s.time + plan.wait)} 之后，继续今天的主线`;
       sub = `等待 ${plan.wait} 分钟`;
     } else {
       label = `${s.mainIdx === 0 ? '开始' : '继续'}：${slot.label}`;
@@ -773,6 +839,29 @@ export function hubView(s: GameState): HubView {
       warn: crossWarning(s, 30),
     },
   ];
+  const sleep = sleepView(s);
+
+  // ---- 把行动分成三层：此刻最相关 / 更多探索 / 日常行动 ----
+  const primary: ActionView[] = [];
+  const used = new Set<string>();
+  const put = (a: ActionView | undefined | null) => {
+    if (a && !used.has(a.id) && primary.length < PRIMARY_MAX) {
+      primary.push(a);
+      used.add(a.id);
+    }
+  };
+  if (plan) put(main);
+  put(daily.find((a) => a.id === 'go_home'));
+  if (slot) {
+    const eat = daily.find((a) => a.id === 'eat_home' && !a.disabled) ?? daily.find((a) => a.id === 'eat_bento' && !a.disabled);
+    put(eat);
+  }
+  if (!sleep.disabled) put(sleep);
+  const explore = [...sides, ...quests];
+  for (const a of explore) if (!a.disabled) put(a);
+  const more = explore.filter((a) => !used.has(a.id));
+  const routine = [...daily.filter((a) => a.id !== 'go_home'), sleep].filter((a) => !used.has(a.id));
+
   return {
     reminder: hubReminder(s),
     place: s.place,
@@ -780,9 +869,13 @@ export function hubView(s: GameState): HubView {
     sides,
     quests,
     daily,
-    sleep: sleepView(s),
+    sleep,
     currentSlot: slot,
     mainTotal: slots.length,
+    alerts: hubAlerts(s),
+    primary,
+    more,
+    routine,
   };
 }
 
@@ -812,7 +905,19 @@ function begin(s: GameState): Context {
   return new Context(s);
 }
 
+/** 万一该交代的事因为旧存档或跳转没有发生，由消息补上。同一件事只会补一次。 */
+function ensureTasks(g: Context) {
+  const s = g.s;
+  if (s.ending) return;
+  for (const t of TASKS) {
+    if (taskGiven(s, t.id) || !t.due(s)) continue;
+    g.task(t.id);
+    g.say(t.fallback);
+  }
+}
+
 function finish(g: Context): CommandResult {
+  ensureTasks(g);
   failureCheck(g);
   return { ok: true, state: g.s };
 }

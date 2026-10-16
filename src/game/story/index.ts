@@ -29,24 +29,29 @@ export const SIDES: SideDef[] = [...SIDE_DEFS, ...TALK_DEFS];
 
 const T3: Record<number, number> = { 1: 960, 2: 960, 3: 960, 4: 1020, 5: 1020, 6: 960, 7: 840 };
 
-// 睡前提醒用的话：说清楚还有什么事，但不剧透后面的内容。
+// 睡前提醒用的话：只说“什么时候有什么事”，不透露还没发生的剧情，也不替玩家提前交代没人说过的委托。
+// 真正的委托（比如妈妈让去便利店）走 task 标记：被交代之后才会在日程里出现名字、目标和时间。
 const REMIND: Record<number, [string, string]> = {
-  1: ['小区门口那件对不上的事，还没有问个明白', '妈妈托你下午去一趟便利店'],
-  2: ['爸爸出门前留下的话，饭桌上还没有人接', '傍晚的楼道里，对门的邻居好像有话想说'],
-  3: ['早晨的厨房里，奶奶和小宇那边需要人搭把手', '下午去一趟物业值班室，问问到底卡在哪里'],
-  4: ['上午家里的杂事，每个人手上都有事', '傍晚爸爸要回来，有些话也许能当面说'],
-  5: ['早晨饭桌上，爸爸留下的交代还悬着', '晚饭桌上，一家人都会在，要不要把话说开'],
-  6: ['清点这几天攒下的东西，看看还缺什么', '傍晚家里安静下来，和家人好好待一会儿'],
-  7: ['最后一天的早晨，出门前先把自己安顿好', '下午去值班室，把手里的东西交上去'],
+  1: ['小区门口那件对不上的事，还没有问个明白', '下午的事'],
+  2: ['早饭桌上的事', '傍晚前后的事'],
+  3: ['早晨家里的事', '下午的事'],
+  4: ['上午家里的事', '傍晚的事'],
+  5: ['早晨饭桌上的事', '晚饭前后的事'],
+  6: ['上午的事', '傍晚的事'],
+  7: ['最后一天早晨的事', '下午的事'],
 };
+
+/** 哪些主线节点是“别人交代的委托”。 */
+const SLOT_TASK: Record<string, string> = { d1n3: 'store_errand' };
 
 function slots(day: number): MainSlot[] {
   const title = (id: string) => NODES[id]?.title ?? id;
   const [r1, r3] = REMIND[day];
+  const n3 = `d${day}n3`;
   return [
     { nodeId: `d${day}n1`, label: title(`d${day}n1`), remind: r1 },
     { nodeId: `d${day}n2`, label: title(`d${day}n2`), noon: true, remind: '中午十二点，陪爷爷去阳台' },
-    { nodeId: `d${day}n3`, label: title(`d${day}n3`), minTime: T3[day], remind: r3 },
+    { nodeId: n3, label: title(n3), minTime: T3[day], remind: r3, task: SLOT_TASK[n3] },
   ];
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { hubView, nodeView, SLOT_NAME, askBlock, askHow, buyBlock, type ActionView } from '../game/engine';
 import { ITEMS, NPCS, RULES, RULE_NOTE, SHOP_ORDER } from '../game/story/data';
 import { fmtTime } from '../game/text';
@@ -65,7 +65,9 @@ export function Feedback({ s }: { s: GameState }) {
     <section className="changes" aria-live="polite" aria-label="刚刚发生的变化">
       {s.lastResult ? (
         <div className="result-box">
-          <p>{s.lastResult}</p>
+          {s.lastResult.split('\n\n').map((p, i) => (
+            <p key={i}>{p}</p>
+          ))}
         </div>
       ) : null}
       {s.deltas.length ? (
@@ -260,56 +262,58 @@ function MealStatus({ s }: { s: GameState }) {
   );
 }
 
+/** 展开/收起只是界面状态：不是游戏命令，不消耗时间，不改变任何属性。每走一步自动收起。 */
+function Fold({ title, hint, count, children }: { title: string; hint?: string; count?: number; children: ReactNode }) {
+  const { state: s } = useGame();
+  return (
+    <details className="fold" key={s.counters.steps}>
+      <summary>
+        <span className="fold-title">{title}</span>
+        {count !== undefined ? <span className="fold-count">{count}</span> : null}
+        {hint ? <span className="fold-hint">{hint}</span> : null}
+      </summary>
+      <div className="fold-body">{children}</div>
+    </details>
+  );
+}
+
 function HubBody() {
   const { state: s, act, openPanel } = useGame();
   const v = hubView(s);
-  const slotName = v.currentSlot ? SLOT_NAME[v.currentSlot] : null;
-  const goHome = v.daily.find((a) => a.id === 'go_home');
-  const daily = v.daily.filter((a) => a.id !== 'go_home');
+  const isMain = (a: ActionView) => a.id === 'main' || a.id === 'go_home';
   return (
     <>
       <article className="paper">
         <p className="eyebrow">日程</p>
         <h1 className="title small">第 {s.day} 天的安排</h1>
+        {v.alerts.map((a, i) => (
+          <p className="alert" key={i} role="status">
+            {a}
+          </p>
+        ))}
         <p className="reminder">{v.reminder}</p>
-        <p className="hint">其余行动都是可选的，但每一个都会用掉时间。</p>
         <MealStatus s={s} />
-        {slotName ? <p className="prompt">*提示：现在是{slotName}时间。</p> : null}
       </article>
 
-      <section className="group" aria-labelledby="g-main">
-        <h2 id="g-main">
-          主线 <small>{Math.min(s.mainIdx, v.mainTotal)} / {v.mainTotal}</small>
+      <section className="group" aria-labelledby="g-now">
+        <h2 id="g-now">
+          现在可以做 <small>主线 {Math.min(s.mainIdx, v.mainTotal)} / {v.mainTotal}</small>
         </h2>
-        <ActionBtn a={v.main} kind="main" />
-        {goHome ? <ActionBtn a={goHome} kind="main" /> : null}
+        {v.primary.map((a) => (
+          <ActionBtn key={a.id} a={a} kind={isMain(a) ? 'main' : 'plain'} />
+        ))}
       </section>
 
-      {v.sides.length ? (
-        <section className="group" aria-labelledby="g-side">
-          <h2 id="g-side">
-            支线 <small>可选</small>
-          </h2>
-          {v.sides.map((a) => (
+      {v.more.length ? (
+        <Fold title="更多探索" count={v.more.length} hint={s.place === 'gate' ? '在门口还能做的事' : '其他调查与对话'}>
+          {v.more.map((a) => (
             <ActionBtn key={a.id} a={a} />
           ))}
-        </section>
+        </Fold>
       ) : null}
 
-      {v.quests.length ? (
-        <section className="group" aria-labelledby="g-quest">
-          <h2 id="g-quest">
-            {s.place === 'gate' ? '在门口' : '短行动'} <small>可选</small>
-          </h2>
-          {v.quests.map((a) => (
-            <ActionBtn key={a.id} a={a} />
-          ))}
-        </section>
-      ) : null}
-
-      <section className="group" aria-labelledby="g-daily">
-        <h2 id="g-daily">日常</h2>
-        {daily.map((a) => (
+      <Fold title="日常行动" hint="吃饭、休息、购物、要零花钱">
+        {v.routine.map((a) => (
           <ActionBtn key={a.id} a={a} />
         ))}
         <div className="opt">
@@ -342,12 +346,7 @@ function HubBody() {
             打开背包（使用药品或饮料）
           </button>
         </div>
-      </section>
-
-      <section className="group" aria-labelledby="g-sleep">
-        <h2 id="g-sleep">睡觉</h2>
-        <ActionBtn a={v.sleep} />
-      </section>
+      </Fold>
     </>
   );
 }

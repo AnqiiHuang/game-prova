@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useBlockUse } from './useBlock';
 import { mentionedDocs } from '../game/story/helpers';
+import { taskViews } from '../game/story/tasks';
+import { hypothesisViews } from '../game/story/hypotheses';
 import { CLUES, DOC_INFO, ITEMS, NOTE_LABEL, NPCS, RULES, RULE_NOTE } from '../game/story/data';
 import { RULE_MARK_LABEL, type ItemId, type NpcId, type RuleMark } from '../game/types';
 import { useGame } from './ctx';
@@ -126,7 +128,10 @@ export function RelationsPanel({ onClose }: { onClose: () => void }) {
 export function DiaryPanel({ onClose }: { onClose: () => void }) {
   const { state: s } = useGame();
   const confirmed = CLUES.filter((c) => s.clues[c.id] === 'confirmed');
+  const claims = CLUES.filter((c) => s.clues[c.id] === 'claim');
   const suspect = CLUES.filter((c) => s.clues[c.id] === 'suspect' && c.suspect);
+  const tasks = taskViews(s);
+  const hyps = hypothesisViews(s);
   const notes = Object.keys(NOTE_LABEL).filter((k) => s.notes[k]);
   // 材料只有在剧情里明确提到之后才会出现在日记里
   const shownDocs = mentionedDocs(s);
@@ -150,7 +155,24 @@ export function DiaryPanel({ onClose }: { onClose: () => void }) {
         </>
       ) : null}
 
-      <h3>已证实</h3>
+      {tasks.length ? (
+        <>
+          <h3>待办</h3>
+          <ul className="plain-list">
+            {tasks.map((k) => (
+              <li key={k.id} className="entry task">
+                <span className={`badge ${k.done ? 'ok' : ''}`}>{k.done ? '已完成' : '进行中'}</span>
+                <b>{k.title}</b>
+                <p>{k.goal}</p>
+                <p className="hint">时间：{k.when}</p>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      <h3>已证实的事实</h3>
+      <p className="hint">亲眼见到，或者有确凿凭证的事。</p>
       {confirmed.length ? (
         <ul className="plain-list">
           {confirmed.map((c) => (
@@ -164,7 +186,23 @@ export function DiaryPanel({ onClose }: { onClose: () => void }) {
         <p className="hint">暂时还没有。</p>
       )}
 
-      <h3>怀疑</h3>
+      <h3>人物的说法</h3>
+      <p className="hint">别人说的话，还没有核实，不一定是真的。</p>
+      {claims.length ? (
+        <ul className="plain-list">
+          {claims.map((c) => (
+            <li key={c.id} className="entry claim">
+              <b>{c.title}</b>
+              <p>{c.claim ?? c.suspect}</p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="hint">暂时没有。</p>
+      )}
+
+      <h3>我的怀疑</h3>
+      <p className="hint">我自己觉得蹊跷、但还没有证据的地方。</p>
       {suspect.length ? (
         <ul className="plain-list">
           {suspect.map((c) => (
@@ -177,6 +215,34 @@ export function DiaryPanel({ onClose }: { onClose: () => void }) {
       ) : (
         <p className="hint">暂时没有。</p>
       )}
+
+      {hyps.length ? (
+        <>
+          <h3>新卡为什么没办成？几种可能</h3>
+          <p className="hint">这里只列出目前能对上和对不上的证据，哪一种成立，由你自己判断。</p>
+          <ul className="plain-list">
+            {hyps.map((h) => (
+              <li key={h.id} className={`entry hyp ${h.status}`}>
+                <div className="row between">
+                  <b>{h.title}</b>
+                  <span className={`badge hyp-${h.status}`}>{h.statusText}</span>
+                </div>
+                {h.evidenceFor.map((e, i) => (
+                  <p key={`f${i}`} className="hint">
+                    对得上：{e}
+                  </p>
+                ))}
+                {h.evidenceAgainst.map((e, i) => (
+                  <p key={`a${i}`} className="hint">
+                    对不上：{e}
+                  </p>
+                ))}
+                {!h.evidenceFor.length && !h.evidenceAgainst.length ? <p className="hint">暂时还没有能用来判断的证据。</p> : null}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
 
       {myMarks.length ? (
         <>

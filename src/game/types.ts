@@ -18,7 +18,11 @@ export type StatKey = 'stamina' | 'health' | 'fear' | 'int' | 'luck' | 'money';
 export type ItemId = 'pen' | 'diary' | 'meds' | 'bento' | 'drink' | 'car';
 export type ShopItemId = 'meds' | 'bento' | 'drink' | 'car';
 export type MealSlot = 'breakfast' | 'lunch' | 'dinner';
-export type ClueLevel = 'suspect' | 'confirmed';
+/**
+ * 日记里的三种记录：
+ * claim = 人物的说法（听来的，还没核实）；suspect = 我自己觉得蹊跷、还没有证据的地方；confirmed = 亲眼见到或有确凿凭证的事实。
+ */
+export type ClueLevel = 'claim' | 'suspect' | 'confirmed';
 export type DocKey = 'form' | 'proof' | 'auth';
 export type RuleStatus = 'unknown' | 'true' | 'false';
 /** 玩家自己给家规做的判断标记，不代表系统公布答案。 */
@@ -156,6 +160,8 @@ export interface Ctx {
   say(t: string): void;
   /** 剧情里明确提到了某份材料：之后才会出现在日记的“材料”里。 */
   mention(k: DocKey): void;
+  /** 玩家确实被交代了一件事：记入日记的“待办”，之后才会在日程里显示名称、目标和时间。同一件事只会触发一次。 */
+  task(id: string): void;
   rand(): number;
 }
 
@@ -211,9 +217,24 @@ export interface MainSlot {
   nodeId: string;
   /** 睡前提醒里用的一句话，不剧透。 */
   remind?: string;
+  /** 这个节点是某个委托：只有玩家真的被交代之后，才会显示它的名称、目标和时间要求，也才能开始。 */
+  task?: string;
   minTime?: number; // 最早可进入的时刻（分钟）
   noon?: boolean; // 中午陪爷爷去阳台的节点
   label: string; // 日程页按钮文案
+}
+
+/** 别人交代给玩家的事。交代发生之前，日程、提醒和日记里都不会出现它。 */
+export interface TaskDef {
+  id: string;
+  title: string;
+  giver: string;
+  goal: string;
+  when: string; // 时间要求
+  nodeId: string; // 完成它的主线节点
+  /** 万一前面的对话没有触发（旧存档、跳转），这时候由消息补上。 */
+  due: (s: GameState) => boolean;
+  fallback: string;
 }
 
 export interface SideDef {

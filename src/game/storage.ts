@@ -1,5 +1,6 @@
 // 本地存档：带版本号的 localStorage，读写出错时降级为“临时游玩”（只存在内存里）。
 
+import { TASKS, taskFlag } from './story/tasks';
 import { SAVE_VERSION, type EndingId, type GameState, type RuleMark, type RunMeta } from './types';
 
 export const KEYS = {
@@ -90,6 +91,12 @@ export function normalizeState(s: GameState): GameState {
     }
   }
   s.marks = marks;
+  // 旧存档：委托的剧情已经做完，但当时还没有“被交代”的标记——补上，避免日记和日程缺项
+  if (isObj(s.flags) && Array.isArray(s.visited)) {
+    for (const t of TASKS) {
+      if (s.visited.includes(t.nodeId)) s.flags[taskFlag(t.id)] = true;
+    }
+  }
   return s;
 }
 

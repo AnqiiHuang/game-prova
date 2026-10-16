@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Session } from '../game/session';
 import type { FamilyId, Gender, LuckTier } from '../game/types';
 import type { Settings } from '../settings';
-import { Entrance } from './Art';
+import coverUrl from '../assets/cover-gate.jpg';
 import { Modal } from './Modal';
 import { SettingsBox } from './SettingsBox';
 
@@ -28,7 +28,14 @@ export function Home({ session, settings, setSettings, onNew, onContinue }: Home
       </div>
 
       <div className="paper home-card">
-        <Entrance />
+        <img
+          className="cover-photo"
+          src={coverUrl}
+          width={1280}
+          height={720}
+          alt="阴天傍晚，一个老式居民小区的入口：一栋旧住宅楼，几扇窗透出灯光，深绿色的铁门半掩，左边是公告栏，右边是门卫亭和闸机，没有人。"
+          decoding="async"
+        />
         <div className="home-head">
           <h1 className="title">逃离幸福小区</h1>
           <p className="slogan">七天内，找出那条假的家规。</p>

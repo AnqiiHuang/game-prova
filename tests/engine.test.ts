@@ -366,6 +366,7 @@ describe('支线与奖励不能刷', () => {
     let s = toHub();
     s = atDay(s, 3, 9 * 60);
     s.clues['c_notice2'] = 'confirmed';
+    s.flags['mention_form'] = true; // 剧情里点名过登记表之后才会出现
     s = run(s, { kind: 'quest', id: 'q_form' });
     expect(s.docs.form).toBe(true);
     expect(tryRun(s, { kind: 'quest', id: 'q_form' }).ok).toBe(false);
