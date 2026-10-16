@@ -3,6 +3,7 @@ import { hubView, nodeView, SLOT_NAME, askBlock, askHow, buyBlock, type ActionVi
 import { ITEMS, NPCS, RULES, RULE_NOTE, SHOP_ORDER } from '../game/story/data';
 import { fmtTime } from '../game/text';
 import { FAMILY_IDS, LUCK_LABEL, type GameState, type MealSlot, type NpcId } from '../game/types';
+import { Modal } from './Modal';
 import { useGame } from './ctx';
 
 // ---------- 小部件 ----------
@@ -227,15 +228,75 @@ function NodeScreenBody() {
 
 // ---------- 日程页 ----------
 
+/** 等待到睡觉时间之前，晚餐还没吃：先问清楚。选项只是界面步骤，选定后才会执行一次命令。 */
+function DinnerAsk({ onClose }: { onClose: () => void }) {
+  const { state: s, act } = useGame();
+  const [step, setStep] = useState<'ask' | 'gate'>('ask');
+  const home = s.place === 'home';
+  const run = (dinner: 'home' | 'bento' | 'skip') => {
+    onClose();
+    act({ kind: 'waitSleep', dinner });
+  };
+  if (step === 'gate') {
+    return (
+      <Modal
+        title="先吃晚餐"
+        onClose={onClose}
+        footer={
+          <div className="stack">
+            <button type="button" className="btn primary" onClick={() => { onClose(); act({ kind: 'go', to: 'home' }); }}>
+              先回家（约 10 分钟）
+            </button>
+            {s.inventory.bento > 0 ? (
+              <button type="button" className="btn" onClick={() => run('bento')}>
+                吃背包里的便当（现有 {s.inventory.bento} 份）
+              </button>
+            ) : null}
+            <button type="button" className="btn ghost" onClick={() => setStep('ask')}>
+              返回
+            </button>
+          </div>
+        }
+      >
+        <p className="prompt">*提示：你还在小区门口，家里的饭要回家才能吃。可以先回家，回去之后再选择等待。</p>
+      </Modal>
+    );
+  }
+  return (
+    <Modal
+      title="晚餐"
+      onClose={onClose}
+      footer={
+        <div className="stack">
+          <button type="button" className="btn primary" onClick={() => (home ? run('home') : setStep('gate'))}>
+            先吃晚餐
+          </button>
+          <button type="button" className="btn" onClick={() => run('skip')}>
+            直接等待
+          </button>
+          <button type="button" className="btn ghost" onClick={onClose}>
+            取消
+          </button>
+        </div>
+      }
+    >
+      <p className="prompt">你还没吃晚餐，要先吃饭再休息吗？</p>
+      <p className="hint">晚餐 17:00 开饭、21:00 结束。“直接等待”只会等到 19:00，晚餐仍然算没吃。</p>
+    </Modal>
+  );
+}
+
 function ActionBtn({ a, kind }: { a: ActionView; kind?: 'main' | 'plain' }) {
   const { act } = useGame();
+  const [ask, setAsk] = useState(false);
   return (
     <div className="opt">
+      {ask ? <DinnerAsk onClose={() => setAsk(false)} /> : null}
       <button
         type="button"
         className={`choice ${kind === 'main' ? 'main' : ''} ${a.disabled ? 'locked' : ''}`}
         disabled={!!a.disabled}
-        onClick={() => act(a.cmd)}
+        onClick={() => (a.needDinner ? setAsk(true) : act(a.cmd))}
       >
         <span className="choice-top">
           <span className="choice-label">{a.label}</span>

@@ -283,6 +283,8 @@ export type Command =
   | { kind: 'go'; to: 'home' }
   | { kind: 'markRule'; rule: number; mark: RuleMark }
   | { kind: 'sleep' }
+  /** 主线做完、还没到 19:00 时，一路等到睡觉时间。晚餐还没吃时必须说明怎么处理：先吃（家里/便当）或直接等待。 */
+  | { kind: 'waitSleep'; dinner?: 'home' | 'bento' | 'skip' }
   | { kind: 'nextDay' };
 
 export type CommandInput = Command & { seq: number; confirm?: boolean };

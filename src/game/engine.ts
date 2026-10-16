@@ -517,6 +517,8 @@ export interface ActionView {
   disabled: string | null;
   cmd: Command;
   warn?: string | null;
+  /** 点击前需要先让玩家做一个决定（等待到睡觉时间：晚餐还没吃）。 */
+  needDinner?: boolean;
 }
 
 export interface HubView {
@@ -527,6 +529,8 @@ export interface HubView {
   quests: ActionView[];
   daily: ActionView[];
   sleep: ActionView;
+  /** 主线做完、还没到睡觉时间时，才有“等待到睡觉时间”。 */
+  wait: ActionView | null;
   currentSlot: MealSlot | null;
   mainTotal: number;
   /** 临近用餐或约定时的简短提醒。 */
@@ -553,7 +557,7 @@ function mealWindowText() {
 
 export function eatBlock(s: GameState, how: 'home' | 'bento'): string | null {
   if (s.shopOpen) return '你还在便利店里，先离开便利店。';
-  if (how === 'home' && !atHome(s)) return '你还在小区门口，家里的饭要回家才能吃。';
+  if (how === 'home' && !atHome(s)) return DINNER_NOT_HOME;
   const slot = currentMealSlot(s);
   if (!slot) {
     const open = SLOTS.find((sl) => {
@@ -673,6 +677,43 @@ export function sleepBlock(s: GameState): string | null {
   return null;
 }
 
+const DINNER_NOT_HOME = '你还在小区门口，家里的饭要回家才能吃。';
+
+/** 今天的晚餐还没有任何记录（没吃，也没有被记成错过）。 */
+export function needsDinner(s: GameState): boolean {
+  const m = s.meals[s.day].dinner;
+  return !m.eaten && !m.settled;
+}
+
+/** “等待到睡觉时间”：主线全部完成、还没到 19:00、没有必须先处理的事，才能用。 */
+export function waitBlock(s: GameState): string | null {
+  if (s.mode !== 'hub') return '现在有必须先处理的事。';
+  if (s.shopOpen) return '你还在便利店里，先离开便利店。';
+  const total = MAIN_SLOTS[s.day]?.length ?? 3;
+  if (s.mainIdx < total) return `今天还有事没处理完：${pendingThings(s).join('；')}。`;
+  if (s.noon[s.day] === 'pending') return '中午的约定还没有处理。';
+  if (s.time >= SLEEP_MIN) return `已经到 ${fmtTime(SLEEP_MIN)} 了，不用再等。`;
+  return null;
+}
+
+/** 这一段等待会让哪几顿饭过了时间：提前告诉玩家，确认后才会结算。 */
+export function waitWarning(s: GameState): string | null {
+  const miss = SLOTS.filter((sl) => {
+    const m = s.meals[s.day][sl];
+    return !m.eaten && !m.settled && MEAL_WINDOW[sl][1] <= SLEEP_MIN;
+  });
+  if (!miss.length) return null;
+  const names = miss.map((sl) => SLOT_NAME[sl]).join('和');
+  return `一路等到 ${fmtTime(SLEEP_MIN)}，会让你错过${names}（过了用餐时间就算没吃，体力和健康会下降）。确定继续吗？`;
+}
+
+function durationText(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} 分钟`;
+  return m === 0 ? `${h} 小时` : `${h} 小时 ${m} 分钟`;
+}
+
 /** 日程页顶部的一句提醒：今天还有什么事、人在哪里。 */
 export function hubReminder(s: GameState): string {
   const slots = MAIN_SLOTS[s.day] ?? [];
@@ -681,7 +722,7 @@ export function hubReminder(s: GameState): string {
   if (s.mainIdx < slots.length) {
     parts.push(`今天还有事没处理：${pendingThings(s).join('；')}。`);
   } else if (s.time < SLEEP_MIN) {
-    parts.push(`今天要办的事都办完了。夜还没深，${fmtTime(SLEEP_MIN)} 之后就可以睡觉并存档。`);
+    parts.push(`今天要办的事都办完了。夜还没深，${fmtTime(SLEEP_MIN)} 之后就可以睡觉并存档，也可以直接“等待到睡觉时间”。`);
   } else {
     parts.push('今天要办的事都办完了，随时可以睡觉并存档。');
   }
@@ -840,6 +881,7 @@ export function hubView(s: GameState): HubView {
     },
   ];
   const sleep = sleepView(s);
+  const wait: ActionView | null = !plan && s.time < SLEEP_MIN ? waitView(s) : null;
 
   // ---- 把行动分成三层：此刻最相关 / 更多探索 / 日常行动 ----
   const primary: ActionView[] = [];
@@ -856,6 +898,7 @@ export function hubView(s: GameState): HubView {
     const eat = daily.find((a) => a.id === 'eat_home' && !a.disabled) ?? daily.find((a) => a.id === 'eat_bento' && !a.disabled);
     put(eat);
   }
+  if (wait) put(wait);
   if (!sleep.disabled) put(sleep);
   const explore = [...sides, ...quests];
   for (const a of explore) if (!a.disabled) put(a);
@@ -870,12 +913,26 @@ export function hubView(s: GameState): HubView {
     quests,
     daily,
     sleep,
+    wait,
     currentSlot: slot,
     mainTotal: slots.length,
     alerts: hubAlerts(s),
     primary,
     more,
     routine,
+  };
+}
+
+function waitView(s: GameState): ActionView {
+  const dinner = needsDinner(s);
+  return {
+    id: 'wait_sleep',
+    label: '等待到睡觉时间',
+    sub: `等待 ${durationText(Math.max(0, SLEEP_MIN - s.time))}，到 ${fmtTime(SLEEP_MIN)}${dinner ? ' · 晚餐还没吃' : ''}`,
+    disabled: waitBlock(s),
+    cmd: { kind: 'waitSleep' },
+    warn: waitWarning(s),
+    needDinner: dinner,
   };
 }
 
@@ -1092,32 +1149,10 @@ export function perform(prev: GameState, input: CommandInput): CommandResult {
       const block = eatBlock(prev, cmd.how);
       if (block) return fail(block);
       const slot = currentMealSlot(prev)!;
-      const mins = cmd.how === 'home' ? 30 : 20;
-      const warn = crossWarning(prev, mins);
+      const warn = crossWarning(prev, cmd.how === 'home' ? 30 : 20);
       if (warn && !input.confirm) return { ok: false, confirm: true, reason: warn };
       const g = begin(s);
-      // 第 3 天的晚饭有一个“饭菜有问题”的小插曲
-      if (s.day === 3 && slot === 'dinner' && cmd.how === 'home' && !s.flags['food3_seen']) {
-        s.flags['food3_seen'] = true;
-        enterNode(g, 'mini_d3_food');
-        return finish(g);
-      }
-      const rec = s.meals[s.day][slot];
-      rec.eaten = true;
-      rec.settled = true;
-      if (cmd.how === 'home') {
-        rec.by = 'home';
-        g.stat('stamina', 10, `吃了家里的${SLOT_NAME[slot]}`);
-        g.say(mealVignette(s, slot));
-      } else {
-        rec.by = 'bento';
-        s.inventory.bento -= 1;
-        g.stat('health', 5, '吃了便当');
-        g.stat('stamina', 5, '吃了便当');
-        g.say(`你把便当当作${SLOT_NAME[slot]}，吃完了。`);
-      }
-      advance(g, mins);
-      s.lastResult = null;
+      eatNow(g, cmd.how, slot);
       return finish(g);
     }
     case 'rest': {
@@ -1190,9 +1225,63 @@ export function perform(prev: GameState, input: CommandInput): CommandResult {
       const g = begin(s);
       return doSleep(g);
     }
+    case 'waitSleep': {
+      const block = waitBlock(prev);
+      if (block) return fail(block);
+      // 只有晚餐还没记录时，“先吃”和“直接等待”才有意义；已有记录就直接等，不会重复用餐
+      const open = needsDinner(prev);
+      if (open && !cmd.dinner) return fail('晚餐还没吃，请先决定是先吃晚餐还是直接等待。');
+      const how = open && cmd.dinner !== 'skip' ? cmd.dinner : undefined;
+      if (how === 'home' && !atHome(prev)) return fail(DINNER_NOT_HOME);
+      if (how === 'bento' && prev.inventory.bento <= 0) return fail('背包里没有便当。');
+      const warn = waitWarning(prev);
+      if (warn && !input.confirm) return { ok: false, confirm: true, reason: warn };
+      const g = begin(s);
+      if (how) {
+        // 还没到开饭时间：先等到开饭，再按正常规则结算用餐
+        if (s.time < MEAL_WINDOW.dinner[0]) advance(g, MEAL_WINDOW.dinner[0] - s.time);
+        if (s.ending) return finish(g);
+        if (eatNow(g, how, 'dinner') === 'node') return finish(g); // 饭桌上有事：停在这里，等玩家处理
+      }
+      const where = s.place === 'home' ? '家里' : '小区门口';
+      if (s.time < SLEEP_MIN) advance(g, SLEEP_MIN - s.time);
+      if (s.ending) return finish(g);
+      g.say(
+        `你在${where}等了一阵，时间走到了 ${fmtTime(s.time)}。${needsDinner(s) ? '晚饭还没吃。' : ''}${s.place === 'home' ? '' : '睡觉要先回家。'}`,
+      );
+      return finish(g);
+    }
     default:
       return fail('未知命令。');
   }
+}
+
+/** 吃一顿饭并结算（行动区的“吃饭”和“等待到睡觉时间”共用）。返回 'node' 表示饭桌上进了小插曲，需要玩家先处理。 */
+function eatNow(g: Context, how: 'home' | 'bento', slot: MealSlot): 'node' | 'done' {
+  const s = g.s;
+  // 第 3 天的晚饭有一个“饭菜有问题”的小插曲
+  if (s.day === 3 && slot === 'dinner' && how === 'home' && !s.flags['food3_seen']) {
+    s.flags['food3_seen'] = true;
+    enterNode(g, 'mini_d3_food');
+    return 'node';
+  }
+  const rec = s.meals[s.day][slot];
+  rec.eaten = true;
+  rec.settled = true;
+  if (how === 'home') {
+    rec.by = 'home';
+    g.stat('stamina', 10, `吃了家里的${SLOT_NAME[slot]}`);
+    g.say(mealVignette(s, slot));
+  } else {
+    rec.by = 'bento';
+    s.inventory.bento -= 1;
+    g.stat('health', 5, '吃了便当');
+    g.stat('stamina', 5, '吃了便当');
+    g.say(`你把便当当作${SLOT_NAME[slot]}，吃完了。`);
+  }
+  advance(g, how === 'home' ? 30 : 20);
+  s.lastResult = null;
+  return 'done';
 }
 
 function applyChoice(s: GameState, node: StoryNode, c: Choice, minutes: number, v: ReturnType<typeof voiceOf>): CommandResult {
